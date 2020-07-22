@@ -1,0 +1,123 @@
+---
+title: "weekday bias"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+
+[data from here](https://infogram.com/1p7ve7kjeld1pebz2nm0vpqv7nsnp92jn2x?live)
+
+imports and libraries
+```{r}
+library(tidyverse)
+cases <- read.csv("cases_daily_aus.csv") 
+colnames(cases) <- c("date", "new.cases")
+#add 2020 to all date strings
+cases <- mutate(cases, date = paste(date,"/2020", sep = ""))
+#format date strings as date objects
+cases <- mutate(cases, date = as.Date(date, format = "%d/%m/%Y"))
+#use weekdays() to identify weekday
+cases <- mutate(cases, weekday = weekdays(date))
+#because I only have half of the current week I will truncate from before the 19th of July
+cases <- filter(cases, date < "2020-07-19")
+cases
+```
+Frequency per weekday
+```{r}
+frequency.by.weekday <- cases %>% group_by(weekday) %>% summarise( sum = sum(new.cases))
+frequency.by.weekday <- merge(frequency.by.weekday, count(cases, weekday))
+#rename columns
+colnames(frequency.by.weekday) <- c("weekday","sum.new.cases","count.of.weekday")
+#set weekday as factor with Sunday as start of week
+frequency.by.weekday$weekday <- factor(frequency.by.weekday$weekday, levels = 
+      c("Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"))
+#reorder so that data.frame follows this order
+frequency.by.weekday <- frequency.by.weekday[order(frequency.by.weekday$weekday),]
+#print!
+frequency.by.weekday
+```
+
+```{r}
+ggplot(frequency.by.weekday, aes(weekday, sum.new.cases)) +
+  geom_col()
+```
+
+Distribution of cases per day
+```{r}
+hist(cases$new.cases)
+```
+
+Is bias due to a few very big case days? They absolutely bias the results. Unsure how to account for this yet.
+```{r}
+saturday.cases <- cases %>% filter(weekday == "Saturday")
+hist(saturday.cases$new.cases, breaks = dim(saturday.cases)[1])
+```
+Probably a better way to do this, because this way I have to adjust by an off-by-one error. First generate slopes using lm() for each 7 day range, sunday to saturday. Put into vector `slopes`. Then calculate start dates from cases$date using seq(), make sure first day is 26-Jan since this is the first day included in the slopes calculation.
+
+Maybe should try graphing this.
+
+Will need to normalise so that each graph has same magnitude. I think if I take min(x) for vector x of new.case counts for each 7 day interval it should at least be alright.
+
+For the weekday with minimum new.cases per 7 day interval, there are sometimes multiple weekdays. In the seven.day stats table they are assigned "multiple". I will make a separate table to illustrate all of them. Note that most multiple day counts come from early in the outbreak when there were many zero days.
+
+```{r}
+mins = c()
+means = c()
+maxs = c()
+min_weekday <- c()
+max_weekday <- c()
+n_days <- c()
+slopes <- c()
+
+for (i in seq(2,dim(cases)[1],7)) {
+  #select an interval of seven days from Sunday to Saturday
+  index_7 <- i + 6
+  temp.df <- cases[i:index_7,]
+  temp.df <- drop_na(temp.df) #last entry might have NA rows
+  
+  #calculate a linear regression slope for each interval
+  slopes <- append(slopes, coefficients(lm(new.cases~date, temp.df))['date'])
+  
+  # get mins and means
+  mins <- append(mins, min(temp.df$new.cases))
+  means <- append(means, mean(temp.df$new.cases))
+  maxs <- append(maxs, max(temp.df$new.cases))
+  
+  #append unique weekdays which have min value
+  min_weekday_temp <- filter(temp.df, new.cases == min(temp.df$new.cases))$weekday
+  if (length(min_weekday_temp) > 1) {
+    min_weekday_temp <- c("multiple")
+  }
+  min_weekday <- append(min_weekday, min_weekday_temp)
+  
+  #append unique weekdays which have max value
+  max_weekday_temp <- filter(temp.df, new.cases == max(temp.df$new.cases))$weekday
+  if (length(max_weekday_temp) > 1) {
+    max_weekday_temp <- c("multiple")
+  }
+  max_weekday <- append(max_weekday, max_weekday_temp)
+  
+  #get number of days in each interval for debugging purposes
+  n_days <- append(n_days, dim(temp.df)[1])
+}
+seven.day <- data.frame(date = dates, n_days = n_days, slopes = slopes, 
+                        mins = mins, means=means, maxs = maxs, 
+                        min_weekday = min_weekday, max_weekday = max_weekday)
+seven.day
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
